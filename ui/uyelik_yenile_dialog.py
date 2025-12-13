@@ -3,15 +3,16 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QMessageBox, QRadioButton, QButtonGroup)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
+from database import dao
+from datetime import datetime, timedelta
 
 
 class UyelikYenileDialog(QDialog):
     """Üyelik yenileme dialog penceresi."""
     uyelik_yenilendi = pyqtSignal()
     
-    def __init__(self, db, uye_id, uye_ad, parent=None):
+    def __init__(self, uye_id, uye_ad, parent=None):
         super().__init__(parent)
-        self.db = db
         self.uye_id = uye_id
         self.uye_ad = uye_ad
         self.setWindowTitle("Üyelik Yenile")
@@ -194,12 +195,12 @@ class UyelikYenileDialog(QDialog):
     
     def paketleri_yukle(self):
         """Paketleri combo box'a yükle."""
-        paketler = self.db.paketleri_getir()
+        paketler = dao.get_all_packages()
         for paket in paketler:
-            # paket = (id, paket_adi, sure_gun, fiyat, aciklama)
+            # PostgreSQL dict format: {id, name, duration_days, price, description}
             self.paket_combo.addItem(
-                f"{paket[1]} - {paket[3]:.0f} TL ({paket[4]})", 
-                paket[0]
+                f"{paket['name']} - {paket['price']:.0f} TL ({paket['description']})", 
+                paket['id']
             )
     
     def uyelik_yenile(self):
@@ -230,18 +231,51 @@ class UyelikYenileDialog(QDialog):
         )
         
         if reply == QMessageBox.Yes:
-            paket_id = self.paket_combo.currentData()
-            uyelik_id = self.db.uyelik_yenile(self.uye_id, paket_id, odeme_tipi)
-            
-            if uyelik_id:
+            try:
+                paket_id = self.paket_combo.currentData()
+                
+                # Paket bilgilerini al
+                paket = dao.get_package(paket_id)
+                if not paket:
+                    QMessageBox.warning(self, 'Hata', 'Paket bulunamadı!')
+                    return
+                
+                # Ödeme tipi ID'sini al
+                payment_types = dao.get_all_payment_types()
+                payment_type_map = {
+                    "Nakit": next((pt['id'] for pt in payment_types if pt['name'] == 'Nakit'), 1),
+                    "Kredi Kartı": next((pt['id'] for pt in payment_types if pt['name'] == 'Kredi Kartı'), 2),
+                    "Havale/EFT": next((pt['id'] for pt in payment_types if pt['name'] == 'Banka Havalesi'), 3)
+                }
+                payment_type_id = payment_type_map.get(odeme_tipi, 1)
+                
+                # Yeni abonelik oluştur
+                start_date = datetime.now()
+                end_date = start_date + timedelta(days=paket['duration_days'])
+                
+                subscription_id = dao.create_subscription(
+                    user_id=self.uye_id,
+                    package_id=paket_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    price_sold=float(paket['price']),
+                    payment_type_id=payment_type_id
+                )
+                
+                # Kullanıcı durumunu aktif yap
+                dao.update_user(self.uye_id, status='Aktif')
+                
                 QMessageBox.information(
                     self,
                     'Başarılı',
                     f'Üyelik başarıyla yenilendi!\n\n'
-                    f'Yeni Üyelik No: {uyelik_id}\n'
+                    f'Yeni Abonelik No: {subscription_id}\n'
+                    f'Paket: {paket["name"]}\n'
+                    f'Süre: {paket["duration_days"]} gün\n'
                     f'Ödeme Tipi: {odeme_tipi}'
                 )
                 self.uyelik_yenilendi.emit()
                 self.accept()
-            else:
-                QMessageBox.warning(self, 'Hata', 'Üyelik yenilenirken bir hata oluştu!')
+                
+            except Exception as e:
+                QMessageBox.critical(self, 'Hata', f'Üyelik yenilenirken bir hata oluştu:\n{str(e)}')

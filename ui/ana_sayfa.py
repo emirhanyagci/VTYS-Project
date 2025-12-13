@@ -559,7 +559,7 @@ class AnaSayfa(QMainWindow):
         uye_id = int(self.uye_tablosu.item(satir, 0).text())
         uye_ad = self.uye_tablosu.item(satir, 1).text()
         
-        # Yenileme dialog'unu aç
+        # Yenileme dialog'unu aç (db parametresi kaldırıldı)
         dialog = UyelikYenileDialog(uye_id, uye_ad, self)
         dialog.uyelik_yenilendi.connect(self.uyeleri_yukle)
         dialog.exec_()
